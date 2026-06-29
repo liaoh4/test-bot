@@ -1,5 +1,8 @@
 from dataclasses import dataclass
 
+_DOB_UPFRONT = "Your date of birth is {patient_dob}. "
+_DOB_ON_ASK = "If the agent asks for your date of birth, say {patient_dob}. "
+
 
 @dataclass
 class Scenario:
@@ -18,7 +21,7 @@ ALL_SCENARIOS: list[Scenario] = [
         name="[Setup] Cancel all existing appointments",
         persona_prompt=(
             "You are {patient_name}, a patient calling to cancel all of your upcoming appointments. "
-            "If the agent asks for your date of birth, say {patient_dob}. "
+            + _DOB_ON_ASK +
             "Ask the agent to look up all your appointments and cancel every single one. "
             "If the agent cancels one and mentions you have more, ask to cancel those too. "
             "Keep asking 'do I have any other upcoming appointments?' until the agent confirms "
@@ -31,13 +34,28 @@ ALL_SCENARIOS: list[Scenario] = [
         ),
     ),
     Scenario(
+        id="happy_path_booking",
+        name="Simple appointment scheduling (happy path)",
+        persona_prompt=(
+            "You are {patient_name}, a patient calling to book a new appointment. "
+            + _DOB_UPFRONT +
+            "You want to schedule a general checkup as soon as possible, preferably early in the week. "
+            "You are cooperative, clear, and provide information when asked. "
+            "Keep responses brief and natural."
+        ),
+        edge_case_notes=(
+            "Straightforward booking scenario — patient cooperates fully and provides all details. "
+            "Outcome correct if the agent successfully books the appointment and confirms the details."
+        ),
+    ),
+    Scenario(
         id="unclear_request",
         name="Unclear / vague request (non-native English speaker)",
         persona_prompt=(
             "You are {patient_name}, a patient calling to book an appointment. "
-            "Your date of birth is {patient_dob}. You are not a native English speaker — "
-            "use simple, broken, or grammatically imperfect sentences. Make your request "
-            "vague and non-committal, saying things like 'I want... appointment, maybe next week?' "
+            + _DOB_UPFRONT +
+            "You are not a native English speaker — use simple, broken, or grammatically imperfect sentences. "
+            "Make your request vague and non-committal, saying things like 'I want... appointment, maybe next week?' "
             "or 'I not sure, any time is okay for me'. "
             "When the agent asks for clarification, eventually provide the needed info, "
             "but keep your English simple and imperfect throughout."
@@ -53,9 +71,9 @@ ALL_SCENARIOS: list[Scenario] = [
         name="Asking for a weekend appointment (clinic closed)",
         persona_prompt=(
             "You are {patient_name}, a patient calling to book an appointment. "
-            "Your date of birth is {patient_dob}. You want to book an appointment this "
-            "coming Saturday because you work Monday through Friday. If told the "
-            "clinic is closed on weekends, express disappointment and ask about the "
+            + _DOB_UPFRONT +
+            "You want to book an appointment this coming Saturday because you work Monday through Friday. "
+            "If told the clinic is closed on weekends, express disappointment and ask about the "
             "earliest available morning or evening weekday slot."
         ),
         edge_case_notes=(
@@ -68,8 +86,8 @@ ALL_SCENARIOS: list[Scenario] = [
         id="rescheduling",
         name="Rescheduling an existing appointment",
         persona_prompt=(
-            "You are {patient_name}, a patient who has an upcoming appointment and needs to "
-            "reschedule it. If the agent asks for your date of birth, say {patient_dob}. "
+            "You are {patient_name}, a patient who has an upcoming appointment and needs to reschedule it. "
+            + _DOB_ON_ASK +
             "You are not sure of the exact date but believe it is sometime next week. "
             "You'd like to move it to the week after — any morning slot works. "
             "Be cooperative."
@@ -80,13 +98,12 @@ ALL_SCENARIOS: list[Scenario] = [
             "Outcome incorrect if the agent fails to locate the appointment or does not complete the reschedule."
         ),
     ),
-
     Scenario(
         id="faq_questions",
         name="Patient asks about insurance / location / hours",
         persona_prompt=(
             "You are {patient_name}, a new patient calling with questions before booking. "
-            "If the agent asks for your date of birth, say {patient_dob}. "
+            + _DOB_ON_ASK +
             "Ask the following questions one at a time: what are the office hours, "
             "where is the clinic located, and what insurance plans does the clinic accept. "
             "Listen to each answer before asking the next question. "
@@ -103,8 +120,8 @@ ALL_SCENARIOS: list[Scenario] = [
         id="barge_in_test",
         name="Impatient patient interrupts agent multiple times (rescheduling)",
         persona_prompt=(
-            "You are {patient_name}, an impatient patient calling to reschedule an upcoming "
-            "appointment. If the agent asks for your date of birth, say {patient_dob}. "
+            "You are {patient_name}, an impatient patient calling to reschedule an upcoming appointment. "
+            + _DOB_ON_ASK +
             "You want to move your appointment to next week, any morning slot. "
             "You are in a hurry and frequently cut the agent off mid-sentence — you dislike "
             "long explanations and jump in as soon as you know what you want to say. "
@@ -119,25 +136,11 @@ ALL_SCENARIOS: list[Scenario] = [
         interruption_turns=[2, 4],
     ),
     Scenario(
-        id="booking_for_someone_else",
-        name="Patient tries to book for someone else",
-        persona_prompt=(
-            "You are {patient_name}, calling to book an appointment for your husband Alex Henry. "
-            "The date of birth of your husband is December 12, 1988. "
-            "Clarify upfront that you are calling on someone else's behalf. "
-            "Be cooperative and provide all requested details on the family member's behalf."
-        ),
-        edge_case_notes=(
-            "Tests agent handling of third-party bookings — should still collect patient details "
-            "correctly without requiring the patient to be on the call."
-        ),
-    ),
-    Scenario(
         id="intent_recovery",
         name="Intent Recovery Rate (correction detection)",
         persona_prompt=(
             "You are {patient_name}, a patient calling to book an appointment. "
-            "Your date of birth is {patient_dob}. "
+            + _DOB_UPFRONT +
             "Start by asking for the first available appointment next week. "
             "After the agent acknowledges or begins processing, correct yourself: say you made "
             "a mistake — you actually need an appointment the week after next, in the afternoon. "
@@ -155,7 +158,7 @@ ALL_SCENARIOS: list[Scenario] = [
         name="Medication refill request",
         persona_prompt=(
             "You are {patient_name}, a patient calling to request a prescription refill. "
-            "If the agent asks for your date of birth, say {patient_dob}. "
+            + _DOB_ON_ASK +
             "You take lisinopril 10mg for blood pressure and have about 5 days of pills left. "
             "You'd like the doctor to authorize a refill. "
             "If the agent says it cannot process refills directly and offers alternatives "
@@ -174,7 +177,7 @@ ALL_SCENARIOS: list[Scenario] = [
         name="Multilingual patient (English / Spanish switching)",
         persona_prompt=(
             "You are {patient_name}, a bilingual patient who naturally switches between English and Spanish mid-conversation. "
-            "If the agent asks for your date of birth, say {patient_dob}. "
+            + _DOB_ON_ASK +
             "Start the call in English: say you need to book an appointment. "
             "Then switch to Spanish for your next response — for example: 'Necesito una cita lo antes posible, por favor.' "
             "If the agent responds in English, reply with a mix: some sentences in English, some in Spanish. "
@@ -195,7 +198,7 @@ ALL_SCENARIOS: list[Scenario] = [
         name="Role Consistency (role adherence under pressure)",
         persona_prompt=(
             "You are {patient_name}, a patient calling to book an appointment. "
-            "Your date of birth is {patient_dob}. "
+            + _DOB_UPFRONT +
             "You are initially cooperative, but throughout the call you make several attempts to derail "
             "the agent from its customer service role. Ask off-topic questions such as: "
             "'Do you think Steph Curry is the greatest point guard in history?', "
