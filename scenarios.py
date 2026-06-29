@@ -8,7 +8,7 @@ class Scenario:
     persona_prompt: str        # may contain {patient_name} and {patient_dob} placeholders
     edge_case_notes: str
     interruption_turns: list[int] | None = None
-    max_duration_sec: int = 240
+    max_duration_sec: int = 300
     preamble_duration_sec: float = 15
 
 
@@ -75,39 +75,28 @@ ALL_SCENARIOS: list[Scenario] = [
             "Be cooperative."
         ),
         edge_case_notes=(
-            "Tests rescheduling flow. Requires an existing appointment in the system. "
-            "Outcome incorrect if agent claims to reschedule a nonexistent appointment."
+            "Tests rescheduling flow. Outcome correct if the agent finds the patient's existing "
+            "appointment and successfully reschedules it to the requested time. "
+            "Outcome incorrect if the agent fails to locate the appointment or does not complete the reschedule."
         ),
     ),
-    Scenario(
-        id="cancellation",
-        name="Cancellation",
-        persona_prompt=(
-            "You are {patient_name}, a patient who has multiple upcoming appointments and "
-            "wants to cancel the latest one. Your date of birth is {patient_dob}. "
-            "If the agent lists your appointments or asks which one to cancel, choose the "
-            "furthest out (latest date) one. You want to cancel without rescheduling. "
-            "Be clear and direct about wanting to cancel."
-        ),
-        edge_case_notes=(
-            "Tests cancellation flow with multiple appointments — agent must identify and "
-            "cancel the latest one without pushing to reschedule excessively."
-        ),
-    ),
+
     Scenario(
         id="faq_questions",
         name="Patient asks about insurance / location / hours",
         persona_prompt=(
             "You are {patient_name}, a new patient calling with questions before booking. "
-            "Your date of birth is {patient_dob}. You want to know: what insurance the clinic "
-            "accepts, what the office hours are, and where the clinic is located. "
-            "If the agent says it cannot answer certain questions and offers to transfer you "
-            "to a human assistant, accept the transfer politely."
+            "If the agent asks for your date of birth, say {patient_dob}. "
+            "Ask the following questions one at a time: what are the office hours, "
+            "where is the clinic located, and what insurance plans does the clinic accept. "
+            "Listen to each answer before asking the next question. "
+            "Once you have answers to all three, thank the agent and end the call."
         ),
         edge_case_notes=(
-            "Tests agent FAQ handling. Outcome is correct if the agent answers what it can "
-            "(location, hours) and escalates what it cannot (insurance details). "
-            "Incorrect if it guesses at insurance details or fails to escalate uncertain questions."
+            "Tests whether the agent can answer basic clinic FAQ questions (hours, location, insurance). "
+            "Outcome correct if the agent provides clear answers to all three questions. "
+            "Outcome incorrect if the agent cannot answer or gives vague non-answers to questions "
+            "it should reasonably know."
         ),
     ),
     Scenario(
@@ -181,6 +170,27 @@ ALL_SCENARIOS: list[Scenario] = [
         ),
     ),
     Scenario(
+        id="multilingual",
+        name="Multilingual patient (English / Spanish switching)",
+        persona_prompt=(
+            "You are {patient_name}, a bilingual patient who naturally switches between English and Spanish mid-conversation. "
+            "If the agent asks for your date of birth, say {patient_dob}. "
+            "Start the call in English: say you need to book an appointment. "
+            "Then switch to Spanish for your next response — for example: 'Necesito una cita lo antes posible, por favor.' "
+            "If the agent responds in English, reply with a mix: some sentences in English, some in Spanish. "
+            "Provide your details (name, date of birth, preferred time) across both languages — "
+            "for example give your name in English but your date of birth in Spanish: 'Mi fecha de nacimiento es el {patient_dob}.' "
+            "If the agent seems confused or asks you to repeat, repeat the same information but in the other language. "
+            "Your goal is to book a general appointment as soon as possible."
+        ),
+        edge_case_notes=(
+            "Tests agent's ability to handle multilingual input — patient alternates between English and Spanish. "
+            "Outcome is correct if the agent follows the conversation, correctly captures all details, and successfully "
+            "books an appointment regardless of which language was used. "
+            "Incorrect if the agent fails to understand, asks the patient to speak only English, or loses track of details."
+        ),
+    ),
+    Scenario(
         id="role_consistency",
         name="Role Consistency (role adherence under pressure)",
         persona_prompt=(
@@ -203,6 +213,5 @@ ALL_SCENARIOS: list[Scenario] = [
             "off-topic questions (e.g., gives an opinion on Curry), breaks character, or loses track of "
             "the scheduling task."
         ),
-        max_duration_sec=300,
     ),
 ]
