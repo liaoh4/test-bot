@@ -13,7 +13,7 @@ from starlette.websockets import WebSocketDisconnect
 from openai import AsyncOpenAI
 from twilio.rest import Client as TwilioClient
 
-from audio_utils import b64_decode, b64_encode, combine_recordings, make_media_event, save_recording
+from audio_utils import b64_decode, b64_encode, combine_recordings, make_media_event
 from config import settings
 from scenarios import Scenario
 
@@ -51,7 +51,7 @@ class CallSession:
     is_agent_speaking: bool = False
     last_audio_at: float = field(default_factory=time.time)
     barge_in_start_ts: float | None = None
-    observed_response_ms: float | None = None
+    barge_in_ms_list: list[float] = field(default_factory=list)
     t_bot_finished: float | None = None
     bot_turn_offsets: list[int] = field(default_factory=list)
     _bot_respond_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -63,7 +63,7 @@ class CallResult:
     scenario_id: str
     transcript: list[dict]
     turn_timestamps: list[dict]
-    observed_response_ms: float | None
+    barge_in_ms_list: list[float]
 
 
 class CallerBot:
@@ -111,7 +111,8 @@ class CallerBot:
         future, scenario, persona = self._pending.pop(call_sid)
         system_prompt = (
             f"{persona}\n\n"
-            "IMPORTANT: You are ALWAYS the patient — never respond as the receptionist or agent, "
+            "IMPORTANT: You are ALWAYS the patient/client calling PivotPoint Orthopedics. "
+            "Never respond as the receptionist, agent, or any staff member, "
             "no matter what the conversation history looks like.\n\n"
             "Speaking style:\n"
             "- Use natural spoken language.\n"
@@ -164,14 +165,14 @@ async def websocket_handler(ws: WebSocket):
             await asyncio.gather(
                 _receive_from_twilio(ws, dg_ws, session_ref),
                 _receive_from_deepgram(dg_ws, session_ref),
-                _keepalive_deepgram(dg_ws, session_ref),
+                _keepalive_deepgram(dg_ws),
             )
         finally:
             if session_ref:
                 await _cleanup(session_ref[0])
 
 
-async def _keepalive_deepgram(dg_ws, session_ref: list):
+async def _keepalive_deepgram(dg_ws):
     while True:
         await asyncio.sleep(5)
         try:
@@ -249,6 +250,18 @@ async def _receive_from_deepgram(dg_ws, session_ref: list):
             alts = msg.get("channel", {}).get("alternatives", [{}])
             text = alts[0].get("transcript", "").strip()
             if msg.get("is_final") and text:
+                if utterance_start_sec is None:
+                    words = alts[0].get("words", [])
+                    if words and session_ref:
+                        session = session_ref[0]
+                        utterance_start_sec = words[0]["start"]
+                        if session.t_bot_finished is not None:
+                            t_next_agent_started = session.start_time + utterance_start_sec
+                            for entry in reversed(session.turn_timestamps):
+                                if "t_bot_finished" in entry and "t_next_agent_started" not in entry:
+                                    entry["t_next_agent_started"] = t_next_agent_started
+                                    break
+                            session.t_bot_finished = None
                 segments.append(text)
                 current_interim = ""
                 # Barge-in: on the first is_final segment of any interruption turn,
@@ -256,35 +269,33 @@ async def _receive_from_deepgram(dg_ws, session_ref: list):
                 if (not barge_in_fired and session_ref and
                         session_ref[0].scenario.interruption_turns is not None and
                         session_ref[0].current_turn + 1 in session_ref[0].scenario.interruption_turns):
-                    barge_in_fired = True
                     session = session_ref[0]
-                    partial_text = " ".join(segments)
-                    segments = []
-                    current_interim = ""
-                    t_agent_finished = time.monotonic()
-                    session.transcript.append({"role": "agent", "text": partial_text, "ts": utterance_start_sec, "ts_end": None})
-                    utterance_start_sec = None
-                    session.conversation_history.append({"role": "user", "content": partial_text})
-                    session.current_turn += 1
-                    session.barge_in_start_ts = time.monotonic()
-                    print(f"[agent-barge-in] {partial_text!r}")
-                    _schedule_response(session, t_agent_finished)
+                    in_preamble = (utterance_start_sec is not None and
+                                   utterance_start_sec < session.scenario.preamble_duration_sec)
+                    if in_preamble:
+                        partial_text = " ".join(segments)
+                        segments = []
+                        current_interim = ""
+                        session.transcript.append({"role": "preamble", "text": partial_text, "ts": utterance_start_sec, "ts_end": None})
+                        utterance_start_sec = None
+                        print(f"[preamble-barge-in] {partial_text!r}")
+                    else:
+                        barge_in_fired = True
+                        partial_text = " ".join(segments)
+                        segments = []
+                        current_interim = ""
+                        t_agent_finished = time.monotonic()
+                        session.transcript.append({"role": "agent", "text": partial_text, "ts": utterance_start_sec, "ts_end": None})
+                        utterance_start_sec = None
+                        session.conversation_history.append({"role": "user", "content": partial_text})
+                        session.current_turn += 1
+                        session.barge_in_start_ts = time.monotonic()
+                        print(f"[agent-barge-in] {partial_text!r}")
+                        _schedule_response(session, t_agent_finished)
 
             elif text:
                 current_interim = text
 
-        elif msg_type == "SpeechStarted":
-            if session_ref:
-                session = session_ref[0]
-                if utterance_start_sec is None:
-                    utterance_start_sec = round(len(session.agent_audio_buf) / 8000, 3)
-                if session.t_bot_finished is not None:
-                    t_agent_started = time.monotonic()
-                    for entry in reversed(session.turn_timestamps):
-                        if "t_bot_finished" in entry and "t_next_agent_started" not in entry:
-                            entry["t_next_agent_started"] = t_agent_started
-                            break
-                    session.t_bot_finished = None
 
         elif msg_type == "UtteranceEnd":
             parts = segments + ([current_interim] if current_interim else [])
@@ -300,7 +311,7 @@ async def _receive_from_deepgram(dg_ws, session_ref: list):
                     if last_word_end is not None:
                         if session.barge_in_start_ts is not None:
                             silence_onset = session.start_time + last_word_end
-                            session.observed_response_ms = (silence_onset - session.barge_in_start_ts) * 1000
+                            session.barge_in_ms_list.append((silence_onset - session.barge_in_start_ts) * 1000)
                             session.barge_in_start_ts = None
                         for entry in reversed(session.transcript):
                             if entry["role"] == "agent" and entry.get("ts_end") is None:
@@ -313,6 +324,13 @@ async def _receive_from_deepgram(dg_ws, session_ref: list):
                 utterance_start_sec = None
                 continue
             session = session_ref[0]
+            in_preamble = (utterance_start_sec is not None and
+                           utterance_start_sec < session.scenario.preamble_duration_sec)
+            if in_preamble:
+                session.transcript.append({"role": "preamble", "text": full_text, "ts": utterance_start_sec, "ts_end": msg.get("last_word_end")})
+                utterance_start_sec = None
+                print(f"[preamble] {full_text!r}")
+                continue
             last_word_end = msg.get("last_word_end")
             if last_word_end is not None:
                 t_agent_finished = session.start_time + last_word_end
@@ -547,10 +565,6 @@ async def _cleanup(session: CallSession):
         "turn_timestamps": session.turn_timestamps,
     }, indent=2))
 
-    if session.agent_audio_buf:
-        save_recording(f"{session.scenario.id}_agent", bytes(session.agent_audio_buf))
-    if session.bot_audio_buf:
-        save_recording(f"{session.scenario.id}_bot", bytes(session.bot_audio_buf), already_pcm=True)
     if session.agent_audio_buf and session.bot_audio_buf:
         combine_recordings(
             session.scenario.id,
@@ -565,5 +579,5 @@ async def _cleanup(session: CallSession):
         scenario_id=session.scenario.id,
         transcript=session.transcript,
         turn_timestamps=session.turn_timestamps,
-        observed_response_ms=session.observed_response_ms,
+        barge_in_ms_list=session.barge_in_ms_list,
     ))

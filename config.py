@@ -16,8 +16,8 @@ class Settings(BaseSettings):
     WEBHOOK_BASE_URL: str = ""
     USE_NGROK: bool = True
     APP_PORT: int = 8001
-    PATIENT_NAME: str = "Test Patient"
-    PATIENT_DOB: str = "1990-01-01"
+    PATIENT_NAME: str = "Sarah Mitchell"
+    PATIENT_DOB: str = "July 4th, 2000"
     BACKEND_URL: str = ""
     TEST_RESET_SECRET: str = ""
 

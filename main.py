@@ -2,7 +2,6 @@ import argparse
 import asyncio
 import sys
 
-import httpx
 import uvicorn
 from pyngrok import ngrok
 
@@ -12,23 +11,7 @@ from reporter import generate_report
 from scenarios import ALL_SCENARIOS, Scenario
 
 
-async def reset_and_seed() -> str:
-    if not settings.BACKEND_URL or not settings.TEST_RESET_SECRET:
-        return ""
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            f"{settings.BACKEND_URL}/api/test-reset",
-            json={"caller_phone": settings.TWILIO_CALLER_NUMBER, "target_phone": settings.TARGET_PHONE_NUMBER},
-            headers={"x-reset-secret": settings.TEST_RESET_SECRET},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        print(f"[reset] deleted {data['deleted_clients']} clients, blocker date: {data['blocked_date']}")
-        return data["blocked_date"]
-
-
-async def run_scenarios(selected: list[Scenario], blocked_date: str = ""):
+async def run_scenarios(selected: list[Scenario]):
     results = []
     for scenario in selected:
         print(f"\n[{scenario.id}] Starting: {scenario.name}")
@@ -37,7 +20,6 @@ async def run_scenarios(selected: list[Scenario], blocked_date: str = ""):
                 scenario,
                 patient_name=settings.PATIENT_NAME,
                 patient_dob=settings.PATIENT_DOB,
-                blocked_date=blocked_date,
             )
             results.append(result)
             print(f"[{scenario.id}] Done — {len(result.turn_timestamps)} rounds")
@@ -71,8 +53,7 @@ async def main():
     while not server.started:
         await asyncio.sleep(0.1)
 
-    blocked_date = await reset_and_seed()
-    results = await run_scenarios(selected, blocked_date=blocked_date)
+    results = await run_scenarios(selected)
 
     server.should_exit = True
     await server_task

@@ -1,5 +1,7 @@
 import base64
 import struct
+import subprocess
+import tempfile
 import wave
 from pathlib import Path
 
@@ -85,26 +87,19 @@ def combine_recordings(
 
     recordings_dir = Path("recordings")
     recordings_dir.mkdir(exist_ok=True)
-    wav_path = recordings_dir / f"{scenario_id}_combined.wav"
-    with wave.open(str(wav_path), "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(8000)
-        wf.writeframes(bytes(combined))
-    return wav_path
+    mp3_path = recordings_dir / f"{scenario_id}_combined.mp3"
 
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+        with wave.open(str(tmp_path), "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(8000)
+            wf.writeframes(bytes(combined))
 
-def save_recording(call_id: str, audio_bytes: bytes, already_pcm: bool = False) -> Path:
-    recordings_dir = Path("recordings")
-    recordings_dir.mkdir(exist_ok=True)
-
-    wav_path = recordings_dir / f"{call_id}.wav"
-    pcm = audio_bytes if already_pcm else mulaw_to_pcm16(audio_bytes)
-
-    with wave.open(str(wav_path), "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)   # 16-bit
-        wf.setframerate(8000)
-        wf.writeframes(pcm)
-
-    return wav_path
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", str(tmp_path), "-codec:a", "libmp3lame", "-qscale:a", "2", str(mp3_path)],
+        check=True, capture_output=True,
+    )
+    tmp_path.unlink(missing_ok=True)
+    return mp3_path
