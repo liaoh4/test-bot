@@ -18,8 +18,6 @@ class Settings(BaseSettings):
     APP_PORT: int = 8001
     PATIENT_NAME: str = "Sarah Mitchell"
     PATIENT_DOB: str = "July 4th, 2000"
-    BACKEND_URL: str = ""
-    TEST_RESET_SECRET: str = ""
 
 
 settings = Settings()
