@@ -7,14 +7,17 @@ from pathlib import Path
 
 
 def b64_encode(data: bytes) -> str:
+    """Encode bytes to a base64 string."""
     return base64.b64encode(data).decode("utf-8")
 
 
 def b64_decode(data: str) -> bytes:
+    """Decode a base64 string to bytes."""
     return base64.b64decode(data)
 
 
 def make_media_event(stream_sid: str, b64_audio: str) -> dict:
+    """Build a Twilio media WebSocket event carrying base64-encoded audio."""
     return {
         "event": "media",
         "streamSid": stream_sid,
@@ -23,6 +26,7 @@ def make_media_event(stream_sid: str, b64_audio: str) -> dict:
 
 
 def make_clear_event(stream_sid: str) -> dict:
+    """Build a Twilio clear event that flushes buffered audio on the stream."""
     return {"event": "clear", "streamSid": stream_sid}
 
 
@@ -66,6 +70,7 @@ def combine_recordings(
     turn_timestamps: list[dict],
     session_start: float,
 ) -> Path:
+    """Mix agent and bot audio into a single MP3 file at recordings/{scenario_id}_combined.mp3."""
     agent_pcm = mulaw_to_pcm16(agent_mulaw)
     combined = bytearray(agent_pcm)
 

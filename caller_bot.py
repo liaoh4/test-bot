@@ -77,6 +77,7 @@ class CallerBot:
         )
 
     async def run_scenario(self, scenario: Scenario, patient_name: str, patient_dob: str, blocked_date: str = "") -> CallResult:
+        """Place an outbound call for the given scenario and await its result."""
         persona = scenario.persona_prompt.format(
             patient_name=patient_name,
             patient_dob=patient_dob,
@@ -100,12 +101,14 @@ class CallerBot:
             raise
 
     def _force_hangup(self, call_sid: str):
+        """Terminate a call via the Twilio REST API, ignoring errors."""
         try:
             self._twilio.calls(call_sid).update(status="completed")
         except Exception:
             pass
 
     def register_session(self, call_sid: str, ws: WebSocket) -> CallSession | None:
+        """Create a CallSession from a pending call and attach it to the Twilio WebSocket."""
         if call_sid not in self._pending:
             return None
         future, scenario, persona = self._pending.pop(call_sid)
@@ -131,6 +134,7 @@ class CallerBot:
         return session
 
     def resolve_session(self, call_sid: str, result: CallResult):
+        """Resolve the call future with its result and clean up session state."""
         future = self._pending.pop(f"_future_{call_sid}", None)
         self._sessions.pop(call_sid, None)
         if future and not future.done():
@@ -142,6 +146,7 @@ bot = CallerBot()
 
 @app.get("/twiml")
 async def twiml():
+    """Return TwiML that connects the inbound call leg to a WebSocket media stream."""
     host = settings.WEBHOOK_BASE_URL.replace("https://", "").replace("http://", "")
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -154,6 +159,7 @@ async def twiml():
 
 @app.websocket("/ws")
 async def websocket_handler(ws: WebSocket):
+    """Accept the Twilio WebSocket, open a Deepgram connection, and run the three async event loops."""
     await ws.accept()
     session_ref: list[CallSession] = []
 
@@ -173,6 +179,7 @@ async def websocket_handler(ws: WebSocket):
 
 
 async def _keepalive_deepgram(dg_ws):
+    """Send periodic KeepAlive pings to Deepgram to prevent the connection from timing out."""
     while True:
         await asyncio.sleep(5)
         try:
@@ -182,6 +189,7 @@ async def _keepalive_deepgram(dg_ws):
 
 
 async def _silence_monitor(session: CallSession):
+    """Poll every 200ms and mark the agent as silent after the silence threshold elapses."""
     while True:
         await asyncio.sleep(0.2)
         if session.is_agent_speaking and (time.time() - session.last_audio_at) > SILENCE_THRESHOLD_SEC:
@@ -189,6 +197,7 @@ async def _silence_monitor(session: CallSession):
 
 
 async def _receive_from_twilio(twilio_ws: WebSocket, dg_ws, session_ref: list):
+    """Forward incoming Twilio audio frames to Deepgram and manage the stream lifecycle."""
     silence_task: asyncio.Task | None = None
     try:
         while True:
@@ -230,10 +239,12 @@ async def _receive_from_twilio(twilio_ws: WebSocket, dg_ws, session_ref: list):
 
 
 def _schedule_response(session: CallSession, t_agent_finished: float):
+    """Fire the bot response as a background asyncio task."""
     asyncio.create_task(_bot_respond(session, t_agent_finished))
 
 
 async def _receive_from_deepgram(dg_ws, session_ref: list):
+    """Process Deepgram transcription events, detect preamble/barge-in, and trigger bot turns."""
     segments: list[str] = []  # speech_final-confirmed segments since last UtteranceEnd
     current_interim: str = ""  # latest in-progress interim text
     barge_in_fired: bool = False
@@ -429,6 +440,7 @@ async def _stream_llm_to_tts(session: CallSession, t_agent_finished: float) -> t
 
 
 async def _bot_respond(session: CallSession, t_agent_finished: float):
+    """Error-safe wrapper around _bot_respond_inner."""
     try:
         await _bot_respond_inner(session, t_agent_finished)
     except Exception as e:
@@ -436,6 +448,7 @@ async def _bot_respond(session: CallSession, t_agent_finished: float):
 
 
 async def _bot_respond_inner(session: CallSession, t_agent_finished: float):
+    """Generate and speak the bot's reply; detect conversation end and hang up when done."""
     async with session._bot_respond_lock:
 
         if await _conversation_is_over(session):
@@ -473,6 +486,7 @@ async def _bot_respond_inner(session: CallSession, t_agent_finished: float):
 
 
 async def _conversation_is_over(session: CallSession) -> bool:
+    """Two-stage end detection: keyword scan on recent agent turns, then LLM goal check."""
     recent_agent = [t["text"].lower() for t in session.transcript[-4:] if t["role"] == "agent"]
     closing_phrases = [
         "goodbye", "bye", "have a good", "take care", "thank you for calling",
@@ -487,6 +501,7 @@ async def _conversation_is_over(session: CallSession) -> bool:
 
 
 async def _llm_goal_check(session: CallSession) -> bool:
+    """Ask DeepSeek whether the conversation has reached a natural end given the scenario goal."""
     transcript_text = "\n".join(
         f"{t['role'].upper()}: {t['text']}" for t in session.transcript
     )
@@ -504,6 +519,7 @@ async def _llm_goal_check(session: CallSession) -> bool:
 
 
 async def _speak(session: CallSession, text: str, t_agent_finished: float, t_llm_done: float | None = None):
+    """Synthesize text via the ElevenLabs HTTP API and stream the audio to Twilio."""
     print(f"[bot] {text!r}")
     url = (
         f"https://api.elevenlabs.io/v1/text-to-speech/{settings.ELEVENLABS_VOICE_ID}/stream"
@@ -553,10 +569,12 @@ async def _speak(session: CallSession, text: str, t_agent_finished: float, t_llm
 
 
 async def _hang_up(session: CallSession):
+    """Terminate the call via the Twilio REST API."""
     bot._twilio.calls(session.call_sid).update(status="completed")
 
 
 async def _cleanup(session: CallSession):
+    """Save the transcript JSON and combined MP3, then resolve the call future."""
     Path("transcripts").mkdir(exist_ok=True)
     transcript_path = Path("transcripts") / f"{session.scenario.id}.json"
     transcript_path.write_text(json.dumps({
