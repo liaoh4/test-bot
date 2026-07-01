@@ -24,7 +24,6 @@ deepseek_client = AsyncOpenAI(
     base_url="https://api.deepseek.com",
 )
 
-SILENCE_THRESHOLD_SEC = 1.5
 _FLUSH_CHARS = frozenset('.!?,;:')
 UTTERANCE_END_MS = 1200
 DEEPGRAM_URL = (
@@ -48,8 +47,6 @@ class CallSession:
     start_time: float = field(default_factory=time.monotonic)
     stream_sid: str = ""
     current_turn: int = 0
-    is_agent_speaking: bool = False
-    last_audio_at: float = field(default_factory=time.time)
     barge_in_start_ts: float | None = None
     barge_in_ms_list: list[float] = field(default_factory=list)
     t_bot_finished: float | None = None
@@ -159,7 +156,7 @@ async def twiml():
 
 @app.websocket("/ws")
 async def websocket_handler(ws: WebSocket):
-    """Accept the Twilio WebSocket, open a Deepgram connection, and run the three async event loops."""
+    """Accept the Twilio WebSocket, open a Deepgram connection, and run the two async event loops."""
     await ws.accept()
     session_ref: list[CallSession] = []
 
@@ -171,34 +168,14 @@ async def websocket_handler(ws: WebSocket):
             await asyncio.gather(
                 _receive_from_twilio(ws, dg_ws, session_ref),
                 _receive_from_deepgram(dg_ws, session_ref),
-                _keepalive_deepgram(dg_ws),
             )
         finally:
             if session_ref:
                 await _cleanup(session_ref[0])
 
 
-async def _keepalive_deepgram(dg_ws):
-    """Send periodic KeepAlive pings to Deepgram to prevent the connection from timing out."""
-    while True:
-        await asyncio.sleep(5)
-        try:
-            await dg_ws.send(json.dumps({"type": "KeepAlive"}))
-        except Exception:
-            return
-
-
-async def _silence_monitor(session: CallSession):
-    """Poll every 200ms and mark the agent as silent after the silence threshold elapses."""
-    while True:
-        await asyncio.sleep(0.2)
-        if session.is_agent_speaking and (time.time() - session.last_audio_at) > SILENCE_THRESHOLD_SEC:
-            session.is_agent_speaking = False
-
-
 async def _receive_from_twilio(twilio_ws: WebSocket, dg_ws, session_ref: list):
     """Forward incoming Twilio audio frames to Deepgram and manage the stream lifecycle."""
-    silence_task: asyncio.Task | None = None
     try:
         while True:
             try:
@@ -218,21 +195,16 @@ async def _receive_from_twilio(twilio_ws: WebSocket, dg_ws, session_ref: list):
                     return
                 session.stream_sid = stream_sid
                 session_ref.append(session)
-                silence_task = asyncio.create_task(_silence_monitor(session))
 
             elif event == "media" and session_ref:
                 session = session_ref[0]
                 audio = b64_decode(msg["media"]["payload"])
                 session.agent_audio_buf.extend(audio)
                 await dg_ws.send(bytes(audio))
-                session.is_agent_speaking = True
-                session.last_audio_at = time.time()
 
             elif event == "stop":
                 break
     finally:
-        if silence_task:
-            silence_task.cancel()
         if session_ref:
             session_ref[0].call_ended = True
         await dg_ws.close()

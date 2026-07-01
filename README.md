@@ -7,31 +7,24 @@ Automated caller bot that simulates patients calling the PivotPoint Orthopedics 
 ## Prerequisites
 
 - Python 3.11+
-- [ffmpeg](https://ffmpeg.org/download.html) — for MP3 conversion (`brew install ffmpeg`)
-- [ngrok](https://ngrok.com/download) — for local tunnel (`brew install ngrok`)
+- [Homebrew](https://brew.sh) — to install system dependencies
 - API keys for: Twilio, Deepgram, ElevenLabs, DeepSeek
 
 ---
 
 ## Setup
 
-**1. Clone and create a virtual environment**
+**1. Clone and run the setup script**
 
 ```bash
 git clone https://github.com/liaoh4/test-bot.git
 cd test-bot
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+bash setup.sh
 ```
 
 **2. Configure environment variables**
 
-Copy `.env.example` to `.env` and fill in your credentials:
-
-```bash
-cp .env.example .env
-```
+Fill in your credentials in `.env`:
 
 | Variable | Description |
 |----------|-------------|
